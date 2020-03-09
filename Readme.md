@@ -5,7 +5,7 @@ Simple golang package that provides server, connection based TCP server bandwidt
 ## Implementations
 - This package works as a wrapper for `io.Reader` and `io.Writer`
 - Default bandwidth is `1024bps` for server and connection
-- The bandwidths for server/connection are set in the config file `/etc/bufnet/config.yaml`
+- The bandwidths for server/connection are set in the config file `/etc/bufnet/config.yaml`  
 For example:  
 ```sh
 # cat /etc/bufnet/config.yaml
@@ -45,7 +45,7 @@ If you want to run tcp server on port 8080 with bandwidth control
 import "github.com/sysdevguru/bufnet"
 
 func main() {
-	// get buffered listener
+    // get buffered listener
     bln, err := bufnet.Listen("tcp", ":8080")
 	if err != nil {
 		// handle error
@@ -82,7 +82,7 @@ func handleConnection(conn net.Conn) {
 import "github.com/sysdevguru/bufnet"
 
 func main() {
-	// get usual listener
+    // get usual listener
     ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		// handle error
