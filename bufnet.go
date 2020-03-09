@@ -30,7 +30,7 @@ type Config struct {
 // getBandwidth returns bandwidth from config file
 // located in /etc/bufnet/config.yaml
 // if config.yaml is not provided, defaultBandwidth will be used
-func getBandwidth(src string) int {
+func getBandwidth(isServer bool) int {
 	data, err := ioutil.ReadFile(configPath)
 	if err != nil {
 		return bandwidth
@@ -42,7 +42,7 @@ func getBandwidth(src string) int {
 		return bandwidth
 	}
 
-	if src == "server" {
+	if isServer {
 		return config.ServerBandwidth
 	}
 	return config.ConnBandwidth
@@ -61,14 +61,14 @@ func Listen(network, addr string) (*BufferedListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	lim := limiter.Limiter{Bandwidth: getBandwidth("server")}
+	lim := limiter.Limiter{Bandwidth: getBandwidth(true)}
 	return &BufferedListener{Limiter: lim, Listener: ln, isServer: true}, nil
 }
 
 // BufConn makes buffered connection based on provided listener and connection
 // this is used for per connection bandwidth control
 func BufConn(c net.Conn, ln net.Listener) *BufferedConn {
-	lim := limiter.Limiter{Bandwidth: getBandwidth("conn")}
+	lim := limiter.Limiter{Bandwidth: getBandwidth(false)}
 	bl := &BufferedListener{Limiter: lim, Listener: ln, isServer: false}
 	return newBufferedConn(bl, c)
 }
@@ -99,9 +99,9 @@ func newBufferedConn(bl *BufferedListener, c net.Conn) *BufferedConn {
 func (bc *BufferedConn) Read(b []byte) (int, error) {
 	var bandwidth int
 	if bc.bl.isServer {
-		bandwidth = getBandwidth("server")
+		bandwidth = getBandwidth(true)
 	} else {
-		bandwidth = getBandwidth("conn")
+		bandwidth = getBandwidth(false)
 	}
 
 	reader := reader.NewReader(bc.Conn, bandwidth)
@@ -112,9 +112,9 @@ func (bc *BufferedConn) Read(b []byte) (int, error) {
 func (bc *BufferedConn) Write(p []byte) (int, error) {
 	var bandwidth int
 	if bc.bl.isServer {
-		bandwidth = getBandwidth("server")
+		bandwidth = getBandwidth(true)
 	} else {
-		bandwidth = getBandwidth("conn")
+		bandwidth = getBandwidth(false)
 	}
 
 	writer := writer.NewWriter(bc.Conn, bandwidth)
