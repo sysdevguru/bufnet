@@ -33,6 +33,12 @@ In that way, the bandwidth change on the config file will be reflected to existi
 ```sh
 go get github.com/sysdevguru/bufnet
 ```
+### Copy config.yaml
+```sh
+mkdir /etc/bufnet
+cp config.yaml /etc/bufnet
+```
+And you can change the `server_bandwidth` or `conn_bandwidth` as you need
 ### Server bandwidth control
 If you want to run tcp server on port 8080 with bandwidth control
 ```go
