@@ -2,7 +2,6 @@ package reader
 
 import (
 	"io"
-	"time"
 
 	"github.com/sysdevguru/bufnet/limiter"
 )
@@ -22,6 +21,11 @@ func NewReader(r io.Reader, bandwidth int) *Reader {
 	return reader
 }
 
+// SetBandwidth changes bandwidth of the Reader
+func (r *Reader) SetBandwidth(bandwidth int) {
+	r.Lim.Bandwidth = bandwidth
+}
+
 // Read implements the io.Reader and maintains a given bandwidth.
 func (r *Reader) Read(p []byte) (n int, err error) {
 	r.Lim.Init()
@@ -38,9 +42,7 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 
 // TestReader is for testing
 type TestReader struct {
-	Size  int
-	Count int
-	Stall time.Duration
+	Size int
 }
 
 // Read implements io.Reader interface
@@ -52,10 +54,6 @@ func (r *TestReader) Read(p []byte) (n int, err error) {
 		n = r.Size
 		err = io.EOF
 	}
-	if r.Count == 1 {
-		time.Sleep(r.Stall)
-	}
-	r.Count++
 	r.Size -= n
 	return n, err
 }

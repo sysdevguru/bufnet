@@ -1,6 +1,6 @@
 
 # Buffered Net package
-Simple golang package that provides server, connection based TCP server bandwidth control
+Simple golang package that provides server, connection based TCP bandwidth control
 
 ## Implementations
 - This package works as a wrapper for `io.Reader` and `io.Writer`
@@ -12,13 +12,13 @@ For example:
 server_bandwidth: 1024 ## 1024bps bandwidth for server
 conn_bandwidth:   512  ## 512bps bandwidth for connections
 ```
-- If you used `Per server bandwidth control`,   `server_bandwidth` change in `config.yaml` will change the existing connections bandwidth, it means `conn_bandwidth` change will not affect to the existing connections
+- If you used `Per server bandwidth control`, `server_bandwidth` change in `config.yaml` will change the existing connections bandwidth, it means `conn_bandwidth` change will not affect to the existing connections
 - If you used `Per connection bandwidth control`, `conn_bandwidth` change in `config.yaml` will change the existing connections bandwidth, it means `server_bandwidth` change will not affect to the existing connections
 
 ### Per server bandwidth control
 For server bandwidth control, `bufnet` provides wrapper for `net.Listener`  
 The wrapper returns buffered `net.Conn` and it is not needed to attach a buffer on the connection level  
-In the below, `ln` is the buffered `net.Conn`  
+In the below, `bln` is the buffered `net.Conn`  
 `bln, err := bufnet.Listen("tcp", ":8080")`
 
 ### Per connection bandwidth control
@@ -38,7 +38,7 @@ go get github.com/sysdevguru/bufnet
 mkdir /etc/bufnet
 cp config.yaml /etc/bufnet
 ```
-And you can change the `server_bandwidth` or `conn_bandwidth` as you need
+And you can change server/connection bandwidth by changing `server_bandwidth` or `conn_bandwidth` values
 ### Server bandwidth control
 If you want to run tcp server on port 8080 with bandwidth control
 ```go

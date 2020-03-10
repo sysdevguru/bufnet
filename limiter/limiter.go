@@ -1,6 +1,13 @@
 package limiter
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+var (
+	thresholdRatio = 0.05
+)
 
 // Limiter limits bandwidth
 type Limiter struct {
@@ -42,10 +49,18 @@ func (l *Limiter) Limit(n, bufSize int) {
 		return
 	}
 
-	// reset the limiter when stall threshold is smaller than elapsed time
+	// reset the limiter when elapsed time is out of thresholds
+	// current threshold is estimated time +/- 5%
 	estimation := time.Duration(bufSize/l.Bandwidth) * time.Second
-	stallThreshold := time.Second + estimation
-	if elapsed > stallThreshold {
+	upperThreshold := time.Duration(thresholdRatio)*estimation + estimation
+	lowerThreshold := estimation - estimation*time.Duration(thresholdRatio)
+	if elapsed > upperThreshold {
+		l.reset()
+		return
+	}
+	if elapsed < lowerThreshold {
+		fmt.Println("here")
+		time.Sleep(elapsed - lowerThreshold)
 		l.reset()
 	}
 }

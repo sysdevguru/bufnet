@@ -21,6 +21,11 @@ func NewWriter(d io.Writer, bandwidth int) *Writer {
 	return writer
 }
 
+// SetBandwidth changes bandwidth of the Writer
+func (w *Writer) SetBandwidth(bandwidth int) {
+	w.Lim.Bandwidth = bandwidth
+}
+
 // Write implements the io.Writer and maintains the given bandwidth.
 func (w *Writer) Write(p []byte) (n int, err error) {
 	w.Lim.Init()

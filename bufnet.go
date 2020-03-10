@@ -50,7 +50,8 @@ func getBandwidth(isServer bool) int {
 
 // BufferedListener is the buffered net.Listener
 type BufferedListener struct {
-	limiter.Limiter
+	reader.Reader
+	writer.Writer
 	net.Listener
 	isServer bool // determine per server, per connection control
 }
@@ -62,14 +63,18 @@ func Listen(network, addr string) (*BufferedListener, error) {
 		return nil, err
 	}
 	lim := limiter.Limiter{Bandwidth: getBandwidth(true)}
-	return &BufferedListener{Limiter: lim, Listener: ln, isServer: true}, nil
+	r := reader.Reader{Lim: lim}
+	w := writer.Writer{Lim: lim}
+	return &BufferedListener{Reader: r, Writer: w, Listener: ln, isServer: true}, nil
 }
 
 // BufConn makes buffered connection based on provided listener and connection
 // this is used for per connection bandwidth control
 func BufConn(c net.Conn, ln net.Listener) *BufferedConn {
 	lim := limiter.Limiter{Bandwidth: getBandwidth(false)}
-	bl := &BufferedListener{Limiter: lim, Listener: ln, isServer: false}
+	r := reader.Reader{Lim: lim}
+	w := writer.Writer{Lim: lim}
+	bl := &BufferedListener{Reader: r, Writer: w, Listener: ln, isServer: false}
 	return newBufferedConn(bl, c)
 }
 
@@ -104,7 +109,10 @@ func (bc *BufferedConn) Read(b []byte) (int, error) {
 		bandwidth = getBandwidth(false)
 	}
 
-	reader := reader.NewReader(bc.Conn, bandwidth)
+	reader := bc.bl.Reader
+	reader.Src = bc.Conn
+	reader.SetBandwidth(bandwidth)
+
 	return reader.Read(b)
 }
 
@@ -117,6 +125,8 @@ func (bc *BufferedConn) Write(p []byte) (int, error) {
 		bandwidth = getBandwidth(false)
 	}
 
-	writer := writer.NewWriter(bc.Conn, bandwidth)
+	writer := bc.bl.Writer
+	writer.Dst = bc.Conn
+	writer.SetBandwidth(bandwidth)
 	return writer.Write(p)
 }

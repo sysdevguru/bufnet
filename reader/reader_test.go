@@ -11,8 +11,8 @@ func TestRest(t *testing.T) {
 	t.Parallel()
 
 	// test reading 2 * 1024 * 1024 data with 500 * 1024 buffer
-	// expected time is 5s
-	tr := &TestReader{Size: 2 << 20, Stall: 1 * time.Second}
+	// expected time is 3.891s~4.308s
+	tr := &TestReader{Size: 2 << 20}
 	br := NewReader(tr, 500<<10)
 
 	start := time.Now()
@@ -25,7 +25,7 @@ func TestRest(t *testing.T) {
 		t.Errorf("Want %d bytes, got %d.", 2<<20, n)
 	}
 	t.Logf("Read %d bytes in %s", n, dur)
-	if dur < 4600*time.Millisecond || dur > 5400*time.Millisecond {
-		t.Errorf("Took %s, want 5s.", dur)
+	if dur < 3891*time.Millisecond || dur > 4308*time.Millisecond {
+		t.Errorf("Took %s, want 3.891s~4.308s.", dur)
 	}
 }
