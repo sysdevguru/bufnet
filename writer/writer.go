@@ -21,8 +21,11 @@ func NewWriter(d io.Writer, bandwidth int) *Writer {
 	return writer
 }
 
-// SetBandwidth changes bandwidth of the Writer
-func (w *Writer) SetBandwidth(bandwidth int) {
+// UpdateWriter updates destination and bandwidth of the Writer
+func (w *Writer) UpdateWriter(dst io.Writer, bandwidth int) {
+	if w.Dst == nil {
+		w.Dst = dst
+	}
 	w.Lim.Bandwidth = bandwidth
 }
 

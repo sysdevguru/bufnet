@@ -109,9 +109,9 @@ func (bc *BufferedConn) Read(b []byte) (int, error) {
 		bandwidth = getBandwidth(false)
 	}
 
+	// change the bandwidth of the origin Reader
 	reader := bc.bl.Reader
-	reader.Src = bc.Conn
-	reader.SetBandwidth(bandwidth)
+	reader.UpdateReader(bc.Conn, bandwidth)
 
 	return reader.Read(b)
 }
@@ -125,8 +125,9 @@ func (bc *BufferedConn) Write(p []byte) (int, error) {
 		bandwidth = getBandwidth(false)
 	}
 
+	// change the bandwidth of the origin Writer
 	writer := bc.bl.Writer
-	writer.Dst = bc.Conn
-	writer.SetBandwidth(bandwidth)
+	writer.UpdateWriter(bc.Conn, bandwidth)
+
 	return writer.Write(p)
 }

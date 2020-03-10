@@ -21,8 +21,11 @@ func NewReader(r io.Reader, bandwidth int) *Reader {
 	return reader
 }
 
-// SetBandwidth changes bandwidth of the Reader
-func (r *Reader) SetBandwidth(bandwidth int) {
+// UpdateReader updates Reader source and bandwidth
+func (r *Reader) UpdateReader(src io.Reader, bandwidth int) {
+	if r.Src == nil {
+		r.Src = src
+	}
 	r.Lim.Bandwidth = bandwidth
 }
 
