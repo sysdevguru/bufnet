@@ -1,7 +1,6 @@
 package limiter
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -54,13 +53,7 @@ func (l *Limiter) Limit(n, bufSize int) {
 	estimation := time.Duration(bufSize/l.Bandwidth) * time.Second
 	upperThreshold := time.Duration(thresholdRatio)*estimation + estimation
 	lowerThreshold := estimation - estimation*time.Duration(thresholdRatio)
-	if elapsed > upperThreshold {
-		l.reset()
-		return
-	}
-	if elapsed < lowerThreshold {
-		fmt.Println("here")
-		time.Sleep(elapsed - lowerThreshold)
+	if elapsed > upperThreshold || elapsed < lowerThreshold {
 		l.reset()
 	}
 }
