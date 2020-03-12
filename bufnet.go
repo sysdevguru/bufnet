@@ -131,3 +131,13 @@ func (bc *BufferedConn) Write(p []byte) (int, error) {
 
 	return writer.Write(p)
 }
+
+// Close the connection
+func (bc *BufferedConn) Close() error {
+	var err error
+	if bc.Conn != nil {
+		err = bc.Conn.Close()
+		bc.Conn = nil
+	}
+	return err
+}

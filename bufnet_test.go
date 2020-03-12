@@ -41,6 +41,9 @@ func TestBufnet(t *testing.T) {
 		// cast the connection
 		bconn := c.(*BufferedConn)
 
+		// if /etc/bufnet/config.yaml has not 1024 for the
+		// server_bandwidth, this test will be failed
+		// since bufnet will use that bandwidth instead of 1024.
 		// test 30 * 1024 data with default 1024 buffer
 		// expected time is 28s ~ 31s
 		tr := &reader.TestReader{Size: 30 << 10}
