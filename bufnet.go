@@ -1,14 +1,9 @@
 package bufnet
 
 import (
-	"io/ioutil"
+	"errors"
 	"net"
-
-	"github.com/sysdevguru/bufnet/limiter"
-	"github.com/sysdevguru/bufnet/reader"
-	"github.com/sysdevguru/bufnet/writer"
-
-	"gopkg.in/yaml.v2"
+	"time"
 )
 
 const (
@@ -16,128 +11,123 @@ const (
 )
 
 var (
-	bandwidth  = defaultBandwidth
-	configPath = "/etc/bufnet/config.yaml"
+	ErrConnBandwidth = errors.New("connection bandwidth should be smaller than server bandwidth")
 )
-
-// Config contains bandwidth info of server, connection
-// and potential other values
-type Config struct {
-	ServerBandwidth int `yaml:"server_bandwidth"`
-	ConnBandwidth   int `yaml:"conn_bandwidth"`
-}
-
-// getBandwidth returns bandwidth from config file
-// located in /etc/bufnet/config.yaml
-// if config.yaml is not provided, defaultBandwidth will be used
-func getBandwidth(isServer bool) int {
-	data, err := ioutil.ReadFile(configPath)
-	if err != nil {
-		return bandwidth
-	}
-
-	config := Config{}
-	err = yaml.Unmarshal(data, &config)
-	if err != nil {
-		return bandwidth
-	}
-
-	if isServer {
-		return config.ServerBandwidth
-	}
-	return config.ConnBandwidth
-}
 
 // BufferedListener is the buffered net.Listener
 type BufferedListener struct {
-	reader.Reader
-	writer.Writer
+	Bandwidth int
+	ConnCount int
 	net.Listener
-	isServer bool // determine per server, per connection control
 }
 
-// Listen on the addr with buffered listener
-func Listen(network, addr string) (*BufferedListener, error) {
-	ln, err := net.Listen(network, addr)
-	if err != nil {
-		return nil, err
+// Listen returns buffered listener
+func Listen(ln net.Listener, serverBandwidth int) *BufferedListener {
+	if serverBandwidth < 0 {
+		serverBandwidth = defaultBandwidth
 	}
-	lim := limiter.Limiter{Bandwidth: getBandwidth(true)}
-	r := reader.Reader{Lim: lim}
-	w := writer.Writer{Lim: lim}
-	return &BufferedListener{Reader: r, Writer: w, Listener: ln, isServer: true}, nil
+	return &BufferedListener{Bandwidth: serverBandwidth, Listener: ln}
 }
 
 // BufConn makes buffered connection based on provided listener and connection
 // this is used for per connection bandwidth control
-func BufConn(c net.Conn, ln net.Listener) *BufferedConn {
-	lim := limiter.Limiter{Bandwidth: getBandwidth(false)}
-	r := reader.Reader{Lim: lim}
-	w := writer.Writer{Lim: lim}
-	bl := &BufferedListener{Reader: r, Writer: w, Listener: ln, isServer: false}
-	return newBufferedConn(bl, c)
+func BufConn(c net.Conn, ln net.Listener, connBandwidth int) *BufferedConn {
+	// set listener bandwidth as 0, no server bandwidth limit
+	bl := &BufferedListener{Bandwidth: 0, Listener: ln}
+
+	if connBandwidth < 0 {
+		connBandwidth = defaultBandwidth
+	}
+	return newBufferedConn(bl, c, connBandwidth)
 }
 
 // Accept returns buffered net.Conn
-func (bl *BufferedListener) Accept() (net.Conn, error) {
+func (bl *BufferedListener) Accept(connBandwidth int) (net.Conn, error) {
 	c, err := bl.Listener.Accept()
 	if err != nil {
 		return c, err
 	}
 
-	c = newBufferedConn(bl, c)
+	if connBandwidth < 0 {
+		connBandwidth = defaultBandwidth
+	}
+	if connBandwidth > bl.Bandwidth {
+		return nil, ErrConnBandwidth
+	}
 
+	// update connections count
+	bl.ConnCount++
+
+	c = newBufferedConn(bl, c, connBandwidth)
 	return c, err
 }
 
 // BufferedConn is the wrapper for net.Conn
 type BufferedConn struct {
-	bl *BufferedListener
+	Bandwidth        int
+	BufferedListener *BufferedListener
+	OriginBandwidth  int
 	net.Conn
 }
 
-func newBufferedConn(bl *BufferedListener, c net.Conn) *BufferedConn {
-	return &BufferedConn{bl: bl, Conn: c}
+func newBufferedConn(bl *BufferedListener, c net.Conn, connBandwidth int) *BufferedConn {
+	return &BufferedConn{Bandwidth: connBandwidth, BufferedListener: bl, OriginBandwidth: connBandwidth, Conn: c}
 }
 
-// Read from buffered connection
-func (bc *BufferedConn) Read(b []byte) (int, error) {
-	var bandwidth int
-	if bc.bl.isServer {
-		bandwidth = getBandwidth(true)
-	} else {
-		bandwidth = getBandwidth(false)
-	}
-
-	// change the bandwidth of the origin Reader
-	reader := bc.bl.Reader
-	reader.UpdateReader(bc.Conn, bandwidth)
-
-	return reader.Read(b)
+func (bc *BufferedConn) Test() int {
+	return bc.BufferedListener.ConnCount
 }
 
 // Write to buffered connection
-func (bc *BufferedConn) Write(p []byte) (int, error) {
-	var bandwidth int
-	if bc.bl.isServer {
-		bandwidth = getBandwidth(true)
-	} else {
-		bandwidth = getBandwidth(false)
+func (bc *BufferedConn) Write(p []byte) (n int, err error) {
+	// if connection bandwidth is 0, no limit
+	if bc.Bandwidth == 0 {
+		return bc.Conn.Write(p)
 	}
 
-	// change the bandwidth of the origin Writer
-	writer := bc.bl.Writer
-	writer.UpdateWriter(bc.Conn, bandwidth)
-
-	return writer.Write(p)
+	// write to connection based on connection bandwidth
+	position := 0
+	for {
+		time.Sleep(1 * time.Second)
+		if position+bc.Bandwidth >= len(p) {
+			bc.updateBandwidth()
+			n, err := bc.Conn.Write(p[position:])
+			if err != nil {
+				return n, err
+			}
+			break
+		}
+		bc.updateBandwidth()
+		n, err := bc.Conn.Write(p[position : position+bc.Bandwidth])
+		if err != nil {
+			return n, err
+		}
+		position += bc.Bandwidth
+	}
+	return len(p), nil
 }
 
-// Close the connection
+// Close the connection, decrease connection count of listener
 func (bc *BufferedConn) Close() error {
 	var err error
 	if bc.Conn != nil {
 		err = bc.Conn.Close()
+		bc.BufferedListener.ConnCount--
 		bc.Conn = nil
 	}
 	return err
+}
+
+func (bc *BufferedConn) updateBandwidth() {
+	// update connection bandwidth when there is server bandwidth limit
+	if bc.BufferedListener.Bandwidth != 0 {
+		// update bandwidth in case total connections bandwidth is larger than server bandwidth
+		if bc.BufferedListener.ConnCount*bc.Bandwidth > bc.BufferedListener.Bandwidth {
+			bc.Bandwidth = bc.BufferedListener.Bandwidth / bc.BufferedListener.ConnCount
+		}
+		// increase bandwidth in case connections are closed
+		if bc.BufferedListener.ConnCount*bc.OriginBandwidth <= bc.BufferedListener.Bandwidth {
+			bc.Bandwidth = bc.OriginBandwidth
+		}
+	}
 }

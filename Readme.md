@@ -1,78 +1,75 @@
-
 # Buffered Net package
-Simple golang package that provides server, connection based TCP bandwidth control
+Simple golang package that provides server, connection based TCP server bandwidth control
 
 ## Implementations
-- This package works as a wrapper for `io.Reader` and `io.Writer`
+- This package works as a wrapper for `io.Writer`
 - Default bandwidth is `1024bps` for server and connection
-- The bandwidths for server/connection are set in the config file `/etc/bufnet/config.yaml`  
-For example:  
-```sh
-# cat /etc/bufnet/config.yaml
-server_bandwidth: 1024 ## 1024bps bandwidth for server
-conn_bandwidth:   512  ## 512bps bandwidth for connections
+- If bandwidth is 0, it means no limit 
+- If the total bandwidth of all connections is exceeding the server bandwidth limit, connection bandwidth will be decreased
+- If the total bandwidth of all connections is getting smaller than the server bandwidth limit, connection bandwidth will be increased toward origin bandwidth
+
+Note:
+- In order to get more exact runtime bandwidth changes, write buffer size has to be larger than connection bandwidth
+```go
+bconn.Write(writeBuf)  // this writeBuf size has to be larger than connection bandwidth
 ```
-- If you used `Per server bandwidth control`, `server_bandwidth` change in `config.yaml` will change the existing connections bandwidth, it means `conn_bandwidth` change will not affect to the existing connections
-- If you used `Per connection bandwidth control`, `conn_bandwidth` change in `config.yaml` will change the existing connections bandwidth, it means `server_bandwidth` change will not affect to the existing connections
-
-### Per server bandwidth control
-For server bandwidth control, `bufnet` provides wrapper for `net.Listener`  
-The wrapper returns buffered `net.Conn` and it is not needed to attach a buffer on the connection level  
-In the below, `bln` is the buffered `net.Conn`  
-`bln, err := bufnet.Listen("tcp", ":8080")`
-
-### Per connection bandwidth control
-You can get `buffered connection` from usual `net.Conn` and `net.Listener`  
-`bConn := bufnet.BufConn(conn, ln)`
-
-### Runtime config change
-New and existing connections get bandwidth information from the config file when they perform `Read` and `Write` functions  
-In that way, the bandwidth change on the config file will be reflected to existing connections as well  
-
+- And the Buffered connection has to be closed correctly in order to change the existing connections bandwidths
+```go
+defer bconn.Close()
+...
+_, err := bconn.Write(writeBuf)
+if err != nil {
+	...
+	return
+}
+```
 ## How to use
 ```sh
 go get github.com/sysdevguru/bufnet
 ```
-### Copy config.yaml
-```sh
-mkdir /etc/bufnet
-cp config.yaml /etc/bufnet
-```
-And you can change server/connection bandwidth by changing `server_bandwidth` or `conn_bandwidth` values
 ### Server bandwidth control
-If you want to run tcp server on port 8080 with bandwidth control
+If you want to run tcp server on port `8080` with `2048` server bandwidth limit  
 ```go
 import "github.com/sysdevguru/bufnet"
 
 func main() {
-    // get buffered listener
-    bln, err := bufnet.Listen("tcp", ":8080")
-	if err != nil {
+    ln, err := net.Listen("tcp", ":8080")
+    if err != nil {
 		// handle error
     }
+    defer ln.Close()
+
+    // get buffered listener with 2048bps bandwidth
+    bln := bufnet.Listen(ln, 2048) 
     
     for {
-		conn, err := bln.Accept()
+        // set connection bandwidth as 1024bps
+		conn, err := bln.Accept(1024) 
 		if err != nil {
 			// handle error
-		}
-		go handleConnection(conn)
+        }
+
+        // type cast to buffered connection
+        bconn := conn.(*bufnet.BufferedConn)
+
+		go handleConnection(bconn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
-    defer conn.Close()
-
-    // type casting to buffered connection
-    bConn := conn.(*bufnet.BufferedConn)
-
-    // read with buffered connection
-    ...
-    bConn.Read(readBuf)
+func handleConnection(bconn *bufnet.BufferedConn) {
+    // close buffered connection and decrease total connection counts
+    defer bconn.Close()
 
     // write into buffered connection
     ...
-    bConn.Write(writeBuf)
+    n, err := bconn.Write(writeBuf)
+    if err != nil {
+        // handle error
+        ...
+        // close buffered connection
+        // to decrease connections count
+        return
+    }
     ...
 }
 ```
@@ -82,37 +79,42 @@ func handleConnection(conn net.Conn) {
 import "github.com/sysdevguru/bufnet"
 
 func main() {
-    // get usual listener
     ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		// handle error
     }
+    defer ln.Close()
     
     for {
 		conn, err := ln.Accept()
 		if err != nil {
 			// handle error
         }
-        // get buffered connection
-        bConn := bufnet.BufConn(conn, ln)
+        
+        // get buffered connection with 1024 bandwidth
+        bConn := bufnet.BufConn(conn, ln, 1024)
+        
 		go handleConnection(bConn)
 	}
 }
 
-func handleConnection(bConn *bufnet.BufferedConn) {
-    defer bConn.Close()
-
-    // read with buffered connection
-    ...
-    bConn.Read(readBuf)
+func handleConnection(bconn *bufnet.BufferedConn) {
+    // close buffered connection and decrease total connection counts
+    defer bconn.Close()
 
     // write into buffered connection
     ...
-    bConn.Write(writeBuf)
+    n, err := bconn.Write(writeBuf)
+    if err != nil {
+        // handle error
+        ...
+        // close buffered connection
+        // to decrease connections count
+        return
+    }
     ...
 }
 ```
 
 ### Runtime bandwidth control
-- If you have applied `bufnet` to server, `server_bandwidth` value change in the `/etc/bufnet/config.yaml` will be reflected to existing connections
-- If you have applied `bufnet` to connection, `conn_bandwidth` value change in the `/etc/bufnet/config.yaml` will be reflected to existing connections
+Connection bandwidth will be adjusted by checking existing connection amount

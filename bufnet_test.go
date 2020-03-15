@@ -1,5 +1,3 @@
-// +build integration
-
 package bufnet
 
 import (
@@ -7,8 +5,6 @@ import (
 	"net"
 	"testing"
 	"time"
-
-	"github.com/sysdevguru/bufnet/reader"
 )
 
 const (
@@ -22,17 +18,18 @@ var (
 
 func TestBufnet(t *testing.T) {
 	// run a test server
-	bln, err := Listen("tcp", serverPort)
+	ln, err := net.Listen("tcp", serverPort)
 	if err != nil {
 		t.Fatalf("Listen failed: %v", err)
 	}
+	bln := Listen(ln, 4096)
 	defer bln.Close()
 
 	done := make(chan int)
 
 	// waiting for client connection
 	go func() {
-		c, err := bln.Accept()
+		c, err := bln.Accept(1024)
 		if err != nil {
 			t.Fatalf("Accept failed: %v", err)
 		}
@@ -41,16 +38,13 @@ func TestBufnet(t *testing.T) {
 		// cast the connection
 		bconn := c.(*BufferedConn)
 
-		// if /etc/bufnet/config.yaml has not 1024 for the
-		// server_bandwidth, this test will be failed
-		// since bufnet will use that bandwidth instead of 1024.
 		// test 30 * 1024 data with default 1024 buffer
 		// expected time is 28s ~ 31s
-		tr := &reader.TestReader{Size: 30 << 10}
+		tr := testReader{size: 30 << 10}
 		sendBuffer := make([]byte, BUFFERSIZE)
 		start := time.Now()
 		for {
-			_, err := tr.Read(sendBuffer)
+			_, err := tr.read(sendBuffer)
 			if err == io.EOF {
 				break
 			}
@@ -79,4 +73,20 @@ func TestBufnet(t *testing.T) {
 	}
 
 	<-done
+}
+
+type testReader struct {
+	size int
+}
+
+func (r *testReader) read(p []byte) (n int, err error) {
+	l := len(p)
+	if l < r.size {
+		n = l
+	} else {
+		n = r.size
+		err = io.EOF
+	}
+	r.size -= n
+	return n, err
 }
