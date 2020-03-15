@@ -35,7 +35,7 @@ import "github.com/sysdevguru/bufnet"
 func main() {
     ln, err := net.Listen("tcp", ":8080")
     if err != nil {
-		// handle error
+        // handle error
     }
     defer ln.Close()
 
@@ -44,16 +44,16 @@ func main() {
     
     for {
         // set connection bandwidth as 1024bps
-		conn, err := bln.Accept(1024) 
-		if err != nil {
-			// handle error
+        conn, err := bln.Accept(1024) 
+        if err != nil {
+            // handle error
         }
 
         // type cast to buffered connection
         bconn := conn.(*bufnet.BufferedConn)
 
-		go handleConnection(bconn)
-	}
+        go handleConnection(bconn)
+    }
 }
 
 func handleConnection(bconn *bufnet.BufferedConn) {
@@ -80,22 +80,22 @@ import "github.com/sysdevguru/bufnet"
 
 func main() {
     ln, err := net.Listen("tcp", ":8080")
-	if err != nil {
-		// handle error
+    if err != nil {
+        // handle error
     }
     defer ln.Close()
     
     for {
-		conn, err := ln.Accept()
-		if err != nil {
-			// handle error
+        conn, err := ln.Accept()
+        if err != nil {
+            // handle error
         }
         
         // get buffered connection with 1024 bandwidth
         bConn := bufnet.BufConn(conn, ln, 1024)
         
-		go handleConnection(bConn)
-	}
+        go handleConnection(bConn)
+    }
 }
 
 func handleConnection(bconn *bufnet.BufferedConn) {
