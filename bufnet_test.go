@@ -42,9 +42,9 @@ func TestBufnet(t *testing.T) {
 		bconn := c.(*BufferedConn)
 
 		// test 30 * 1024 data with default 1024 buffer
-		// expected time is 28s ~ 31s
+		// expected time is 28.5s ~ 31.5s
 		tr := testReader{size: 30 << 10}
-		sendBuffer := make([]byte, BUFFERSIZE)
+		sendBuffer := make([]byte, bconn.Bandwidth)
 		start := time.Now()
 		for {
 			_, err := tr.read(sendBuffer)
@@ -54,8 +54,8 @@ func TestBufnet(t *testing.T) {
 			bconn.Write(sendBuffer)
 		}
 		dur := time.Since(start)
-		if dur < 28000*time.Millisecond || dur > 31000*time.Millisecond {
-			t.Errorf("Took %s, want 28s~31s.", dur)
+		if dur < 28500*time.Millisecond || dur > 31500*time.Millisecond {
+			t.Errorf("Took %s, want 28.5s~31.5s.", dur)
 		}
 		done <- 1
 	}()
