@@ -2,7 +2,9 @@ package bufnet
 
 import (
 	"errors"
+	"io"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -19,6 +21,7 @@ type BufferedListener struct {
 	Bandwidth     int
 	ConnBandwidth int
 	ConnCount     int
+	Mux           sync.Mutex
 	net.Listener
 }
 
@@ -56,7 +59,9 @@ func (bl *BufferedListener) Accept() (net.Conn, error) {
 	}
 
 	// update connections count
+	bl.Mux.Lock()
 	bl.ConnCount++
+	bl.Mux.Unlock()
 
 	c = newBufferedConn(bl, c, bl.ConnBandwidth)
 	return c, err
@@ -76,31 +81,11 @@ func newBufferedConn(bl *BufferedListener, c net.Conn, connBandwidth int) *Buffe
 
 // Write to buffered connection
 func (bc *BufferedConn) Write(p []byte) (n int, err error) {
-	// if connection bandwidth is 0, no limit
-	if bc.Bandwidth == 0 {
-		return bc.Conn.Write(p)
-	}
+	// get updated bandwidth
+	bc.updateBandwidth()
 
-	// write to connection based on connection bandwidth
-	position := 0
-	for {
-		time.Sleep(1 * time.Second)
-		bc.updateBandwidth()
-		if position+bc.Bandwidth >= len(p) {
-			n, err := bc.Conn.Write(p[position:])
-			if err != nil {
-				return n, err
-			}
-			break
-		}
-		bc.updateBandwidth()
-		n, err := bc.Conn.Write(p[position : position+bc.Bandwidth])
-		if err != nil {
-			return n, err
-		}
-		position += bc.Bandwidth
-	}
-	return len(p), nil
+	writer := NewWriter(bc.Conn, bc.Bandwidth)
+	return writer.Write(p)
 }
 
 // Close the connection, decrease connection count of listener
@@ -108,13 +93,17 @@ func (bc *BufferedConn) Close() error {
 	var err error
 	if bc.Conn != nil {
 		err = bc.Conn.Close()
+		bc.BufferedListener.Mux.Lock()
 		bc.BufferedListener.ConnCount--
+		bc.BufferedListener.Mux.Unlock()
 		bc.Conn = nil
 	}
 	return err
 }
 
 func (bc *BufferedConn) updateBandwidth() {
+	bc.BufferedListener.Mux.Lock()
+	defer bc.BufferedListener.Mux.Unlock()
 	// update connection bandwidth when there is server bandwidth limit
 	if bc.BufferedListener.Bandwidth != 0 {
 		// update bandwidth in case total connections bandwidth is larger than server bandwidth
@@ -124,5 +113,80 @@ func (bc *BufferedConn) updateBandwidth() {
 		if bc.BufferedListener.ConnCount*bc.OriginBandwidth <= bc.BufferedListener.Bandwidth {
 			bc.Bandwidth = bc.OriginBandwidth
 		}
+	}
+}
+
+type writer struct {
+	Lim limiter
+	Dst io.Writer
+}
+
+// NewWriter generates new Writer with provided bandwidth.
+func NewWriter(d io.Writer, bandwidth int) *writer {
+	w := &writer{
+		Dst: d,
+		Lim: limiter{Bandwidth: bandwidth},
+	}
+	return w
+}
+
+// Write implements the io.Writer and maintains the given bandwidth.
+func (w *writer) Write(p []byte) (n int, err error) {
+	w.Lim.Init()
+
+	n, err = w.Dst.Write(p)
+	if err != nil {
+		return n, err
+	}
+
+	w.Lim.Limit(n, len(p))
+
+	return n, err
+}
+
+type limiter struct {
+	Bandwidth   int
+	Bucket      int64
+	Initialized bool
+	Start       time.Time
+}
+
+// Init initialize Limiter
+func (l *limiter) Init() {
+	if !l.Initialized {
+		l.reset()
+		l.Initialized = true
+	}
+}
+
+func (l *limiter) reset() {
+	l.Bucket = 0
+	l.Start = time.Now()
+}
+
+// Limit is the function that actually limits bandwidth
+func (l *limiter) Limit(n, bufSize int) {
+	// not apply limit in case desired bandwidth is 0 or negative
+	if l.Bandwidth <= 0 {
+		return
+	}
+
+	l.Bucket += int64(n)
+
+	// elapsed time for the read/write operation
+	elapsed := time.Since(l.Start)
+	// sleep for the keeped time and reset limiter
+	keepedTime := time.Duration(l.Bucket)*time.Second/time.Duration(l.Bandwidth) - elapsed
+	if keepedTime > 0 {
+		time.Sleep(keepedTime)
+		l.reset()
+		return
+	}
+
+	// reset the limiter when stall threshold is smaller than elapsed time
+	estimation := time.Duration(bufSize/l.Bandwidth) * time.Second
+	stallThreshold := time.Second + estimation
+	if elapsed > stallThreshold {
+		l.reset()
 	}
 }
