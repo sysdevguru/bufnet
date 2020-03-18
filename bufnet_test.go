@@ -22,14 +22,17 @@ func TestBufnet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen failed: %v", err)
 	}
-	bln := Listen(ln, 4096)
-	defer bln.Close()
+	bln, err := Listen(ln, 4096, 1024)
+	if err != nil {
+		t.Fatalf("Getting buffered listener failed: %v", err)
+	}
+	defer ln.Close()
 
 	done := make(chan int)
 
 	// waiting for client connection
 	go func() {
-		c, err := bln.Accept(1024)
+		c, err := bln.Accept()
 		if err != nil {
 			t.Fatalf("Accept failed: %v", err)
 		}

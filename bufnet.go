@@ -16,17 +16,24 @@ var (
 
 // BufferedListener is the buffered net.Listener
 type BufferedListener struct {
-	Bandwidth int
-	ConnCount int
+	Bandwidth     int
+	ConnBandwidth int
+	ConnCount     int
 	net.Listener
 }
 
 // Listen returns buffered listener
-func Listen(ln net.Listener, serverBandwidth int) *BufferedListener {
+func Listen(ln net.Listener, serverBandwidth, connBandwidth int) (*BufferedListener, error) {
 	if serverBandwidth < 0 {
 		serverBandwidth = defaultBandwidth
 	}
-	return &BufferedListener{Bandwidth: serverBandwidth, Listener: ln}
+	if connBandwidth < 0 {
+		connBandwidth = defaultBandwidth
+	}
+	if connBandwidth > serverBandwidth {
+		return nil, ErrConnBandwidth
+	}
+	return &BufferedListener{Bandwidth: serverBandwidth, ConnBandwidth: connBandwidth, Listener: ln}, nil
 }
 
 // BufConn makes buffered connection based on provided listener and connection
@@ -42,23 +49,16 @@ func BufConn(c net.Conn, ln net.Listener, connBandwidth int) *BufferedConn {
 }
 
 // Accept returns buffered net.Conn
-func (bl *BufferedListener) Accept(connBandwidth int) (net.Conn, error) {
+func (bl *BufferedListener) Accept() (net.Conn, error) {
 	c, err := bl.Listener.Accept()
 	if err != nil {
 		return c, err
 	}
 
-	if connBandwidth < 0 {
-		connBandwidth = defaultBandwidth
-	}
-	if connBandwidth > bl.Bandwidth {
-		return nil, ErrConnBandwidth
-	}
-
 	// update connections count
 	bl.ConnCount++
 
-	c = newBufferedConn(bl, c, connBandwidth)
+	c = newBufferedConn(bl, c, bl.ConnBandwidth)
 	return c, err
 }
 
@@ -74,10 +74,6 @@ func newBufferedConn(bl *BufferedListener, c net.Conn, connBandwidth int) *Buffe
 	return &BufferedConn{Bandwidth: connBandwidth, BufferedListener: bl, OriginBandwidth: connBandwidth, Conn: c}
 }
 
-func (bc *BufferedConn) Test() int {
-	return bc.BufferedListener.ConnCount
-}
-
 // Write to buffered connection
 func (bc *BufferedConn) Write(p []byte) (n int, err error) {
 	// if connection bandwidth is 0, no limit
@@ -89,8 +85,8 @@ func (bc *BufferedConn) Write(p []byte) (n int, err error) {
 	position := 0
 	for {
 		time.Sleep(1 * time.Second)
+		bc.updateBandwidth()
 		if position+bc.Bandwidth >= len(p) {
-			bc.updateBandwidth()
 			n, err := bc.Conn.Write(p[position:])
 			if err != nil {
 				return n, err
@@ -122,9 +118,8 @@ func (bc *BufferedConn) updateBandwidth() {
 	// update connection bandwidth when there is server bandwidth limit
 	if bc.BufferedListener.Bandwidth != 0 {
 		// update bandwidth in case total connections bandwidth is larger than server bandwidth
-		if bc.BufferedListener.ConnCount*bc.Bandwidth > bc.BufferedListener.Bandwidth {
-			bc.Bandwidth = bc.BufferedListener.Bandwidth / bc.BufferedListener.ConnCount
-		}
+		bc.Bandwidth = bc.BufferedListener.Bandwidth / bc.BufferedListener.ConnCount
+
 		// increase bandwidth in case connections are closed
 		if bc.BufferedListener.ConnCount*bc.OriginBandwidth <= bc.BufferedListener.Bandwidth {
 			bc.Bandwidth = bc.OriginBandwidth
