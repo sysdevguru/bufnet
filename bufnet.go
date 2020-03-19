@@ -14,9 +14,7 @@ const (
 var (
 	errConnBandwidth = errors.New("connection bandwidth should be smaller than server bandwidth")
 
-	acceptLockChan = make(chan struct{}, 1)
-	closeLockChan  = make(chan struct{}, 1)
-	updateLockChan = make(chan struct{}, 1)
+	lockChan = make(chan struct{}, 1)
 )
 
 // BufferedListener is the buffered net.Listener
@@ -63,9 +61,9 @@ func (bl *BufferedListener) Accept() (net.Conn, error) {
 	}
 
 	// update connections count
-	acceptLockChan <- struct{}{}
+	lockChan <- struct{}{}
 	bl.connCount++
-	<-acceptLockChan
+	<-lockChan
 
 	c = newBufferedConn(bl, c, bl.connBandwidth)
 	return c, err
@@ -102,16 +100,16 @@ func (bc *BufferedConn) Close() error {
 	var err error
 	if bc.Conn != nil {
 		err = bc.Conn.Close()
-		closeLockChan <- struct{}{}
+		lockChan <- struct{}{}
 		bc.bufferedListener.connCount--
-		<-closeLockChan
+		<-lockChan
 		bc.Conn = nil
 	}
 	return err
 }
 
 func (bc *BufferedConn) updateBandwidth() {
-	updateLockChan <- struct{}{}
+	lockChan <- struct{}{}
 	// update connection bandwidth when there is server bandwidth limit
 	if bc.bufferedListener.bandwidth != 0 {
 		bc.bandwidth = bc.bufferedListener.bandwidth / bc.bufferedListener.connCount
@@ -121,5 +119,5 @@ func (bc *BufferedConn) updateBandwidth() {
 			bc.bandwidth = bc.originBandwidth
 		}
 	}
-	<-updateLockChan
+	<-lockChan
 }
