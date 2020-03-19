@@ -3,7 +3,6 @@ package bufnet
 import (
 	"errors"
 	"net"
-	"sync"
 
 	"github.com/sysdevguru/bufnet/writer"
 )
@@ -13,15 +12,18 @@ const (
 )
 
 var (
-	ErrConnBandwidth = errors.New("connection bandwidth should be smaller than server bandwidth")
+	errConnBandwidth = errors.New("connection bandwidth should be smaller than server bandwidth")
+
+	acceptLockChan = make(chan struct{}, 1)
+	closeLockChan  = make(chan struct{}, 1)
+	updateLockChan = make(chan struct{}, 1)
 )
 
 // BufferedListener is the buffered net.Listener
 type BufferedListener struct {
-	Bandwidth     int
-	ConnBandwidth int
-	ConnCount     int
-	Mux           sync.Mutex
+	bandwidth     int
+	connBandwidth int
+	connCount     int
 	net.Listener
 }
 
@@ -35,17 +37,17 @@ func Listen(ln net.Listener, serverBandwidth, connBandwidth int) (*BufferedListe
 		connBandwidth = defaultBandwidth
 	}
 	if connBandwidth > serverBandwidth {
-		return nil, ErrConnBandwidth
+		return nil, errConnBandwidth
 	}
 
-	return &BufferedListener{Bandwidth: serverBandwidth, ConnBandwidth: connBandwidth, Listener: ln}, nil
+	return &BufferedListener{bandwidth: serverBandwidth, connBandwidth: connBandwidth, Listener: ln}, nil
 }
 
 // BufConn makes buffered connection based on provided listener and connection
 // this is used for per connection bandwidth control
 func BufConn(c net.Conn, ln net.Listener, connBandwidth int) *BufferedConn {
 	// set listener bandwidth as 0, no server bandwidth limit
-	bl := &BufferedListener{Bandwidth: 0, Listener: ln}
+	bl := &BufferedListener{bandwidth: 0, Listener: ln}
 
 	if connBandwidth < 0 {
 		connBandwidth = defaultBandwidth
@@ -61,24 +63,24 @@ func (bl *BufferedListener) Accept() (net.Conn, error) {
 	}
 
 	// update connections count
-	bl.Mux.Lock()
-	bl.ConnCount++
-	bl.Mux.Unlock()
+	acceptLockChan <- struct{}{}
+	bl.connCount++
+	<-acceptLockChan
 
-	c = newBufferedConn(bl, c, bl.ConnBandwidth)
+	c = newBufferedConn(bl, c, bl.connBandwidth)
 	return c, err
 }
 
 // BufferedConn is the wrapper for net.Conn
 type BufferedConn struct {
-	Bandwidth        int
-	BufferedListener *BufferedListener
-	OriginBandwidth  int
+	bandwidth        int
+	bufferedListener *BufferedListener
+	originBandwidth  int
 	net.Conn
 }
 
 func newBufferedConn(bl *BufferedListener, c net.Conn, connBandwidth int) *BufferedConn {
-	return &BufferedConn{Bandwidth: connBandwidth, BufferedListener: bl, OriginBandwidth: connBandwidth, Conn: c}
+	return &BufferedConn{bandwidth: connBandwidth, bufferedListener: bl, originBandwidth: connBandwidth, Conn: c}
 }
 
 // Write to buffered connection
@@ -86,7 +88,12 @@ func (bc *BufferedConn) Write(p []byte) (n int, err error) {
 	// get updated bandwidth
 	bc.updateBandwidth()
 
-	writer := writer.NewWriter(bc.Conn, bc.Bandwidth)
+	// skip limiting if connection bandwidth is 0
+	if bc.bandwidth == 0 {
+		return bc.Conn.Write(p)
+	}
+
+	writer := writer.NewWriter(bc.Conn, bc.bandwidth)
 	return writer.Write(p)
 }
 
@@ -95,24 +102,24 @@ func (bc *BufferedConn) Close() error {
 	var err error
 	if bc.Conn != nil {
 		err = bc.Conn.Close()
-		bc.BufferedListener.Mux.Lock()
-		bc.BufferedListener.ConnCount--
-		bc.BufferedListener.Mux.Unlock()
+		closeLockChan <- struct{}{}
+		bc.bufferedListener.connCount--
+		<-closeLockChan
 		bc.Conn = nil
 	}
 	return err
 }
 
 func (bc *BufferedConn) updateBandwidth() {
-	bc.BufferedListener.Mux.Lock()
-	defer bc.BufferedListener.Mux.Unlock()
+	updateLockChan <- struct{}{}
 	// update connection bandwidth when there is server bandwidth limit
-	if bc.BufferedListener.Bandwidth != 0 {
-		bc.Bandwidth = bc.BufferedListener.Bandwidth / bc.BufferedListener.ConnCount
+	if bc.bufferedListener.bandwidth != 0 {
+		bc.bandwidth = bc.bufferedListener.bandwidth / bc.bufferedListener.connCount
 
 		// increase bandwidth in case connections are closed
-		if bc.BufferedListener.ConnCount*bc.OriginBandwidth <= bc.BufferedListener.Bandwidth {
-			bc.Bandwidth = bc.OriginBandwidth
+		if bc.bufferedListener.connCount*bc.originBandwidth <= bc.bufferedListener.bandwidth {
+			bc.bandwidth = bc.originBandwidth
 		}
 	}
+	<-updateLockChan
 }
