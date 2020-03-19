@@ -9,11 +9,9 @@ Simple golang package that provides server, connection based TCP server bandwidt
 - If the total bandwidth of all connections is getting smaller than the server bandwidth limit, connection bandwidth will be increased toward origin bandwidth
 
 Note:
-- In order to get more exact runtime bandwidth changes, write buffer size has to be larger than connection bandwidth
-```go
-bconn.Write(writeBuf)  // this writeBuf size has to be larger than connection bandwidth
-```
-- And the Buffered connection has to be closed correctly in order to change the existing connections bandwidths
+- If the `writeBuf` is set 1, it will not work as expected since Golang has an issue with time.Sleep function as described here.  
+https://github.com/golang/go/issues/29485
+- The Buffered connection has to be closed correctly in order to change the existing connections bandwidths
 ```go
 defer bconn.Close()
 ...
@@ -40,11 +38,14 @@ func main() {
     defer ln.Close()
 
     // get buffered listener with 2048bps bandwidth
-    bln := bufnet.Listen(ln, 2048) 
+    // and 1024bps for connection bandwidth
+    bln, err := bufnet.Listen(ln, 2048, 1024) 
+    if err != nil {
+        // handle error
+    }
     
     for {
-        // set connection bandwidth as 1024bps
-        conn, err := bln.Accept(1024) 
+        conn, err := bln.Accept() 
         if err != nil {
             // handle error
         }
